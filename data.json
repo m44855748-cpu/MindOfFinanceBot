@@ -1,0 +1,24 @@
+{
+    "groups": {
+        "-5197685246": {
+            "users": {
+                "8609637925": 40
+            },
+            "history": [
+                "18:24:30 | 8609637925 | 20",
+                "18:24:37 | 8609637925 | 20"
+            ],
+            "admins": [],
+            "tx_count": 2
+        }
+    },
+    "global_admins": [
+        8155651577
+    ],
+    "usernames": {
+        "8609637925": "MindOfFinancebot"
+    },
+    "whitelist": [],
+    "limits": {},
+    "languages": {}
+}
