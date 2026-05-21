@@ -1,7 +1,7 @@
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, CallbackQueryHandler, filters
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone # Added timezone tools for device sync
 import json
 import os
 import secrets
@@ -14,13 +14,19 @@ from reportlab.pdfgen import canvas
 
 DATA_FILE = "data.json"
 
+# =====================================================================
+# 🌍 TIMEZONE ADJUSTMENT CONFIGURATION
+# =====================================================================
+# Change the hours offset below to match your local device's timezone.
+# Examples: For Turkey/Saudi Arabia (GMT+3) use 3. For Western Europe use 1.
+LOCAL_TIMEZONE = timezone(timedelta(hours=3)) 
+
 # =========================
 # LOAD DATA WITH LICENSE KEYS
 # =========================
 if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r") as f:
         data = json.load(f)
-    # Ensure missing licensing structures are appended safely to existing json setups
     if "licenses" not in data:
         data["licenses"] = {}
     if "active_keys" not in data:
@@ -33,8 +39,8 @@ else:
         "whitelist": [],
         "limits": {},
         "languages": {},
-        "licenses": {},      # Format: { "group_id": "YYYY-MM-DD HH:MM:SS" }
-        "active_keys": {}    # Format: { "KEY-STRING": days_integer }
+        "licenses": {},      
+        "active_keys": {}    
     }
 
 def save_data():
@@ -54,8 +60,6 @@ def init_group(group_id):
 # 💎 LICENSE SYSTEM ENGINE
 # =========================
 def is_group_licensed(group_id: str) -> bool:
-    """Checks if a group chat has a valid, active unexpired subscription."""
-    # Direct Messages with the superadmin are unlocked by default
     if int(group_id) in data["global_admins"] or int(group_id) > 0:
         return True
     
@@ -130,7 +134,6 @@ async def activate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if key in data["active_keys"]:
         days = data["active_keys"][key]
         
-        # Calculate new expiration window
         current_expiry = datetime.now()
         if group_id in data["licenses"]:
             try:
@@ -143,7 +146,6 @@ async def activate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         extended_expiry = current_expiry + timedelta(days=days)
         data["licenses"][group_id] = extended_expiry.strftime("%Y-%m-%d %H:%M:%S")
         
-        # Consume key
         del data["active_keys"][key]
         init_group(group_id)
         save_data()
@@ -153,7 +155,6 @@ async def activate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Invalid, expired, or already used activation key.")
 
 async def keygen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Allows Superadmins to generate license keys on the fly from Telegram."""
     user_id = update.effective_user.id
     if user_id not in data["global_admins"]:
         return
@@ -377,7 +378,7 @@ def generate_pdf(group_id, g):
     c.drawString(50, y, "TRANSACTION STATEMENT")
     y -= 30
 
-    tx = g.get("tx_count", 0)  # ✅ FIXED HERE
+    tx = g.get("tx_count", 0)  
 
     for item in g["history"][-50:]:
 
@@ -413,7 +414,7 @@ async def pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.remove(file)
 
 # ==================================
-# MAIN SYSTEM (ORIGINAL CONFIGURATION)
+# MAIN SYSTEM (WITH TRUST EXTENSIONS)
 # ==================================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -425,7 +426,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     group_id = str(update.effective_chat.id)
     
-    # Check if group whitelist license parameters are valid
     if not is_group_licensed(group_id):
         return
 
@@ -434,9 +434,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     init_group(group_id)
     g = data["groups"][group_id]
 
+    # Dynamic Whitelist & Admin Authorization Check Module
     if not is_whitelisted(user_id):
-        await msg.reply_text("🚫 You are not whitelisted")
-        return
+        try:
+            member = await context.bot.get_chat_member(chat_id=update.effective_chat.id, user_id=user_id)
+            if member.status not in ['creator', 'administrator']:
+                await msg.reply_text("🚫 You must be an administrator or whitelisted to adjust values.")
+                return
+        except Exception:
+            await msg.reply_text("🚫 Authorization check failed.")
+            return
 
     if not msg.reply_to_message:
         return
@@ -444,7 +451,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_user = msg.reply_to_message.from_user
     target_id = str(target_user.id)
 
-    # Protection framework against bot target logic mutations
     if target_user.is_bot:
         return
 
@@ -467,7 +473,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text("🚫 Limit exceeded!")
         return
 
-    now = datetime.now().strftime("%H:%M:%S")
+    # Updated with device-synchronized localized clock output mapping
+    now = datetime.now(LOCAL_TIMEZONE).strftime("%H:%M:%S")
 
     g["users"][target_id] = current + amount
     g["history"].append(f"{now} | {target_id} | {amount}")
@@ -475,9 +482,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(g["history"]) > 100:
         g["history"].pop(0)
 
-    # =========================
-    # ✅ FIXED TRANSACTION NUMBER
-    # =========================
     g["tx_count"] = g.get("tx_count", 0) + 1
     tx_number = g["tx_count"]
 
@@ -586,7 +590,6 @@ def generate_key_web():
     return redirect(url_for('home'))
 
 def run_flask_panel():
-    # Bind to 0.0.0.0:8080 to accommodate Replit live port forwarding architecture
     web_app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)
 
 # =========================
@@ -595,14 +598,10 @@ def run_flask_panel():
 if __name__ == '__main__':
     print("🚀 Initializing Operational Background Threads...")
     
-    # 1. Start the Flask Control Panel asynchronous thread
     web_worker = Thread(target=run_flask_panel, daemon=True)
     web_worker.start()
 
-    # 2. Boot the main polling pipeline for Telegram
     print("🚀 Bot starting...")
-    
-    # Ensure you load your custom key inside the token string wrapper safely
     app = ApplicationBuilder().token("8609637925:AAFghPrdrlwwKiR41IPxp8mIlYsCqDb-wCE").build()
 
     app.add_handler(CommandHandler("start", start))
